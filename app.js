@@ -37,7 +37,6 @@ const defaultState = () => ({
   history: {},     // key -> {name, count, last}
 });
 
-let state = load();
 
 function load() {
   try {
@@ -104,6 +103,8 @@ function remember(name) {
   h.name = name; h.count += 1; h.last = Date.now();
   state.history[k] = h;
 }
+
+let state = load();
 
 /* ---------- List operations ---------- */
 
