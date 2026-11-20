@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Groceries</title>
+  <meta name="theme-color" content="#2f6b3a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Groceries">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Groceries</h1>
+    <span id="week-label" class="muted"></span>
+  </header>
+
+  <main>
+    <!-- ===== LIST TAB ===== -->
+    <section id="tab-list" class="tab active">
+      <form id="quick-add" class="quick-add" autocomplete="off">
+        <label for="quick-input" class="sr-only">Add an item</label>
+        <input id="quick-input" list="known-items" placeholder="Ran out of something?" enterkeyhint="done">
+        <button type="submit" class="btn primary">Add</button>
+      </form>
+      <datalist id="known-items"></datalist>
+
+      <div id="recent" class="chips" aria-label="Quick re-add"></div>
+
+      <div id="list-summary" class="summary"></div>
+      <div id="list"></div>
+
+      <div class="actions">
+        <button id="copy-list" class="btn">Copy list</button>
+        <button id="clear-checked" class="btn">Remove checked</button>
+        <button id="new-week" class="btn danger">Start new week</button>
+      </div>
+    </section>
+
+    <!-- ===== STAPLES TAB ===== -->
+    <section id="tab-staples" class="tab">
+      <p class="hint">Things you buy every week. They're added to the list automatically when you start a new week.</p>
+      <form id="staple-add" class="quick-add" autocomplete="off">
+        <input id="staple-input" list="known-items" placeholder="Add a weekly staple">
+        <button type="submit" class="btn primary">Add</button>
+      </form>
+      <ul id="staples" class="plain"></ul>
+    </section>
+
+    <!-- ===== MEALS TAB ===== -->
+    <section id="tab-meals" class="tab">
+      <p class="hint">Pick this week's meals and their ingredients go on the list. Tap a meal to edit it.</p>
+      <div id="meals"></div>
+      <button id="new-meal" class="btn primary wide">+ New meal</button>
+    </section>
+
+    <!-- ===== MORE TAB ===== -->
+    <section id="tab-more" class="tab">
+      <h2>Harris Teeter</h2>
+      <p class="hint">Each list item has a 🔍 button that opens a Harris Teeter search for it, so you can add it to your cart.</p>
+
+      <h2>Backup &amp; move to another device</h2>
+      <p class="hint">Your list is saved on this device. Use these to back it up or copy it to another phone.</p>
+      <div class="actions">
+        <button id="export" class="btn">Export backup</button>
+        <label class="btn">Import backup<input id="import" type="file" accept="application/json" hidden></label>
+      </div>
+
+      <h2>Install on your phone</h2>
+      <p class="hint">iPhone: open this page in Safari, tap Share, then “Add to Home Screen”. It then opens like an app, and works offline.</p>
+
+      <h2>Reset</h2>
+      <button id="reset-all" class="btn danger">Erase everything</button>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button data-tab="list" class="active">🛒<span>List</span></button>
+    <button data-tab="staples">🔁<span>Staples</span></button>
+    <button data-tab="meals">🍽️<span>Meals</span></button>
+    <button data-tab="more">⚙️<span>More</span></button>
+  </nav>
+
+  <!-- Meal editor -->
+  <dialog id="meal-dialog">
+    <form method="dialog" id="meal-form">
+      <h2 id="meal-dialog-title">Meal</h2>
+      <label>Name<input id="meal-name" required placeholder="Tacos"></label>
+      <label>Ingredients <span class="muted">(one per line)</span>
+        <textarea id="meal-ingredients" rows="8" placeholder="ground beef&#10;taco shells&#10;shredded cheese&#10;lettuce"></textarea>
+      </label>
+      <div class="actions">
+        <button type="button" id="meal-delete" class="btn danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="meal-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Category picker -->
+  <dialog id="cat-dialog">
+    <form method="dialog">
+      <h2 id="cat-dialog-title">Aisle</h2>
+      <div id="cat-options" class="cat-grid"></div>
+      <div class="actions"><span class="spacer"></span><button class="btn" value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
