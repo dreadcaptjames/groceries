@@ -1,6 +1,6 @@
 // Offline support: serve the app shell from cache, refresh it in the background.
-const CACHE = 'groceries-v2';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'config.js',
+const CACHE = 'groceries-v3';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

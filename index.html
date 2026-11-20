@@ -16,7 +16,10 @@
 <body>
   <header class="top">
     <h1>Groceries</h1>
-    <span id="week-label" class="muted"></span>
+    <span class="header-right">
+      <button id="sync-badge" class="sync-badge" type="button" hidden title="Sync now"></button>
+      <span id="week-label" class="muted"></span>
+    </span>
   </header>
 
   <main>
@@ -28,8 +31,6 @@
         <button type="submit" class="btn primary">Add</button>
       </form>
       <datalist id="known-items"></datalist>
-
-      <button id="backup-pill" class="backup-pill" type="button" hidden></button>
 
       <div id="recent" class="chips" aria-label="Quick re-add"></div>
 
@@ -65,17 +66,23 @@
       <h2>Harris Teeter</h2>
       <p class="hint">Each list item has a 🔍 button that opens a Harris Teeter search for it, so you can add it to your cart.</p>
 
-      <h2>Google Drive backup</h2>
-      <p id="drive-status" class="hint"></p>
-      <div class="actions" id="drive-actions">
-        <button id="drive-connect" class="btn primary">Connect Google Drive</button>
-        <button id="drive-backup" class="btn">Back up now</button>
-        <button id="drive-restore" class="btn">Restore from Google Drive</button>
-        <button id="drive-disconnect" class="btn danger">Disconnect</button>
+      <h2>Google Sheet</h2>
+      <p id="sheet-status" class="hint"></p>
+      <div id="sheet-setup">
+        <p class="hint">Paste the web app link from your sheet's Apps Script (see the setup steps in the README).</p>
+        <div class="quick-add">
+          <input id="sheet-url" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button id="sheet-connect" class="btn primary" type="button">Connect</button>
+        </div>
+      </div>
+      <div id="sheet-connected" class="actions">
+        <button id="sheet-sync" class="btn" type="button">Sync now</button>
+        <a id="sheet-open" class="btn" target="_blank" rel="noopener">Open Google Sheet</a>
+        <button id="sheet-disconnect" class="btn danger" type="button">Disconnect</button>
       </div>
 
       <h2>iCloud / file backup</h2>
-      <p class="hint">Tap “Save backup”, then choose “Save to Files” and pick iCloud Drive. To restore, tap “Restore from file” and pick that file.</p>
+      <p class="hint">The Google Sheet keeps your data safe, and this is an extra copy. Tap “Save backup”, then choose “Save to Files” and pick iCloud Drive. To restore, tap “Restore from file” and pick that file.</p>
       <div class="actions">
         <button id="export" class="btn">Save backup</button>
         <label class="btn">Restore from file<input id="import" type="file" accept="application/json,.json" hidden></label>
@@ -124,7 +131,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

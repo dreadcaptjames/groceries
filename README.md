@@ -15,19 +15,28 @@ It's plain HTML/CSS/JS with no build step. Any static host works (for example, G
 
     python3 -m http.server 8000
 
-## Backups
+## Google Sheet (backup + shared family list)
 
-Data lives in the browser's storage on each device, plus:
+The app syncs with a Google Sheet in your own Google account. Every phone connected to the same sheet shares one list. Changes sync a couple of seconds after you make them, plus every 30 seconds while the app is open and whenever you switch back to it. Without signal, changes are saved on the phone and sync later. Google Sheets' version history (File → Version history) gives you a backup of every change.
 
-- **Google Drive (automatic):** once connected under **More**, every change is saved to `groceries-backup.json` in your Google Drive. Connect the same Google account on a new phone to restore. Google sign-in lasts about an hour; after that, a banner on the List tab asks for one tap to sign in again and finish the backup.
-- **iCloud / file (manual):** **More → Save backup** opens the iPhone share sheet. Choose "Save to Files" → iCloud Drive. **Restore from file** loads it back.
+You can also edit the sheet directly. Add a row to **List** (just type a name), tick the **inCart** checkbox, or delete a row, and the app picks it up on its next sync. The **Aisles**, **History**, **Settings** and **Deleted** tabs are hidden helpers that the app uses.
 
-### Setting up Google Drive backup (one time)
+### Setup (once, about 5 minutes)
 
-1. Go to https://console.cloud.google.com and create a project (e.g. "Groceries").
-2. **APIs & Services → Library**: search for **Google Drive API** and click **Enable**.
-3. **Google Auth Platform** (called "OAuth consent screen" in older versions of the console): click **Get started**. Enter the app name and your email, choose **External**, and finish.
-4. **Audience**: add the Gmail address of each family member who will use the app as a **test user**.
-5. **Data Access → Add or remove scopes**: add `https://www.googleapis.com/auth/drive.file` and save.
-6. **Clients → Create client**: choose **Web application**. Under **Authorized JavaScript origins**, add `https://dreadcaptjames.github.io`, then create it.
-7. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`) into `config.js`. It isn't a secret.
+1. Create a new Google Sheet, e.g. "Groceries".
+2. In the sheet, open **Extensions → Apps Script**. Delete what's there, paste in the contents of [`apps-script/Code.gs`](apps-script/Code.gs), and click **Save**.
+3. Click **Deploy → New deployment**. Click the gear icon next to "Select type" and choose **Web app**. Set:
+   - **Execute as:** Me
+   - **Who has access:** Anyone
+
+   Click **Deploy**, then **Authorize access** and pick your Google account. Google will warn that the app isn't verified, because it's your own script: click **Advanced → Go to … (unsafe)** → **Allow**.
+4. Copy the **Web app URL** (it starts with `https://script.google.com/macros/s/` and ends in `/exec`).
+5. On each phone, open the app and go to **More → Google Sheet**, paste the link, and tap **Connect**.
+
+Treat that link like a key: anyone who has it can read and change the grocery list. Don't post it publicly (this repository is public, so the link isn't stored in it).
+
+If you change `Code.gs` later, use **Deploy → Manage deployments → Edit (pencil) → Version: New version → Deploy** so the link stays the same.
+
+## Extra backup to iCloud / a file
+
+**More → Save backup** opens the iPhone share sheet. Choose "Save to Files" → iCloud Drive. **Restore from file** loads it back.

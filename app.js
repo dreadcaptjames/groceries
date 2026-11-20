@@ -42,7 +42,13 @@ let state = load();
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...defaultState(), ...JSON.parse(raw) };
+    if (raw) {
+      const s = { ...defaultState(), ...JSON.parse(raw) };
+      // List items and staples are identified by their (lower-cased) name.
+      s.list.forEach((i) => { i.id = keyOf(i.name); });
+      s.staples.forEach((x) => { x.id = keyOf(x.name); });
+      return s;
+    }
   } catch (e) { console.error(e); }
   return defaultState();
 }
@@ -50,7 +56,8 @@ function load() {
 function save() {
   state.updatedAt = Date.now();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  scheduleDriveBackup();
+  trackChanges();
+  scheduleSync();
 }
 
 function commit() { save(); render(); }
@@ -68,9 +75,9 @@ function startOfWeek(d) {
   return x;
 }
 
-function guessCategory(name) {
+function guessCategory(name, cats = state.cats) {
   const k = keyOf(name);
-  if (state.cats[k]) return state.cats[k];
+  if (cats[k]) return cats[k];
   for (const [cat, words] of CATEGORY_HINTS) {
     if (words.some((w) => k.includes(w))) return cat;
   }
@@ -108,7 +115,7 @@ function addToList(name, source) {
   if (item) {
     if (!item.sources.includes(source)) item.sources.push(source);
   } else {
-    item = { id: uid(), name, cat: guessCategory(name), sources: [source], checked: false };
+    item = { id: k, name, cat: guessCategory(name), sources: [source], checked: false };
     state.list.push(item);
   }
   remember(name);
@@ -203,7 +210,7 @@ function render() {
   renderList();
   renderStaples();
   renderMeals();
-  renderBackupStatus();
+  renderSyncStatus();
 }
 
 function renderWeekLabel() {
@@ -426,7 +433,7 @@ $('#staple-add').addEventListener('submit', (e) => {
   const names = input.value.split(',').map(cleanName).filter(Boolean);
   names.forEach((name) => {
     if (!state.staples.some((s) => keyOf(s.name) === keyOf(name))) {
-      state.staples.push({ id: uid(), name });
+      state.staples.push({ id: keyOf(name), name });
     }
     addToList(name, 'staple'); // also put it on this week's list
   });
@@ -496,27 +503,229 @@ $('#reset-all').addEventListener('click', () => {
 });
 
 
-/* ---------- Google Drive backup ---------- */
-// Saves the whole app state to "groceries-backup.json" in the user's Google Drive
-// (drive.file scope: the app can only see files it created). Changes are uploaded
-// a couple of seconds after they happen while a sign-in token is valid (~1 hour);
-// after that, a banner asks for a tap to sign in again and finish the backup.
+/* ---------- Google Sheet sync ---------- */
+// The app keeps working from this device's storage and syncs with a Google Sheet through a
+// small Apps Script web app (see apps-script/Code.gs). Every record (list item, staple, meal…)
+// carries an updatedAt time; on conflict the newer change wins. Only records changed on this
+// device are sent; the sheet answers with everything it has, so changes made on other phones
+// or typed straight into the sheet come back here.
 
-const DRIVE_KEY = 'groceries.drive';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const DRIVE_FILE = 'groceries-backup.json';
-const CLIENT_ID = ((window.GROCERIES_CONFIG || {}).googleClientId || '').trim();
+const SYNC_KEY = 'groceries.sync';
+const SYNC_INTERVAL = 30000;
 
-let drive = loadDriveMeta();
-let driveTimer = null;
-let driveBusy = false;
+let sync = loadSyncMeta();   // {url, sheetUrl, stamps: {key: {h, t, v, dirty}}, tombs: [], lastSync, error}
+let syncing = false;
+let syncAgain = false;
+let syncTimer = null;
 
-function loadDriveMeta() {
-  try { return JSON.parse(localStorage.getItem(DRIVE_KEY)) || {}; } catch { return {}; }
+function loadSyncMeta() {
+  try { return { stamps: {}, tombs: [], ...JSON.parse(localStorage.getItem(SYNC_KEY)) }; }
+  catch { return { stamps: {}, tombs: [] }; }
 }
-function saveDriveMeta() {
-  localStorage.setItem(DRIVE_KEY, JSON.stringify(drive));
-  renderBackupStatus();
+function saveSyncMeta() { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); }
+
+const recKey = (r) => r.collection + ':' + r.id;
+const isTrue = (v) => v === true || String(v).toUpperCase() === 'TRUE';
+
+function hashRec(r) {
+  const fields = Object.keys(r).filter((k) => !['collection', 'id', 'updatedAt'].includes(k)).sort();
+  return JSON.stringify(r, fields);
+}
+
+function stateToRecords(s) {
+  const out = [];
+  s.list.forEach((i) => out.push({ collection: 'List', id: i.id, name: i.name, aisle: i.cat, inCart: !!i.checked, sources: i.sources.join(', ') }));
+  s.staples.forEach((x) => out.push({ collection: 'Staples', id: x.id, name: x.name }));
+  s.meals.forEach((m) => out.push({ collection: 'Meals', id: m.id, name: m.name, ingredients: m.ingredients.join('\n'), thisWeek: s.weekMeals.includes(m.id) }));
+  Object.entries(s.cats).forEach(([k, v]) => out.push({ collection: 'Aisles', id: k, name: k, aisle: v }));
+  Object.entries(s.history).forEach(([k, h]) => out.push({ collection: 'History', id: k, name: h.name, count: h.count, last: h.last || 0 }));
+  out.push({ collection: 'Settings', id: 'weekStart', value: s.weekStart });
+  return out;
+}
+
+function recordsToState(recs) {
+  const s = defaultState();
+  const of = (c) => recs.filter((r) => r.collection === c);
+  of('Aisles').forEach((r) => { if (r.aisle) s.cats[String(r.id)] = String(r.aisle); });
+  of('History').forEach((r) => {
+    s.history[String(r.id)] = { name: String(r.name), count: Number(r.count) || 1, last: Number(r.last) || 0 };
+  });
+  of('Staples').forEach((r) => { const name = cleanName(String(r.name)); if (name) s.staples.push({ id: keyOf(name), name }); });
+  of('Meals').forEach((r) => {
+    const name = cleanName(String(r.name));
+    if (!name) return;
+    const ingredients = [...new Set(String(r.ingredients || '').split(/\n|,/).map(cleanName).filter(Boolean))];
+    s.meals.push({ id: String(r.id), name, ingredients });
+    if (isTrue(r.thisWeek)) s.weekMeals.push(String(r.id));
+  });
+  of('List').forEach((r) => {
+    const name = cleanName(String(r.name));
+    if (!name) return;
+    const sources = String(r.sources || '').split(',').map((x) => x.trim()).filter(Boolean);
+    s.list.push({
+      id: keyOf(name), name,
+      cat: r.aisle ? String(r.aisle) : guessCategory(name, s.cats),
+      sources: sources.length ? sources : ['added'],
+      checked: isTrue(r.inCart),
+    });
+  });
+  const ws = of('Settings').find((r) => r.id === 'weekStart');
+  if (ws && !isNaN(new Date(ws.value))) s.weekStart = new Date(ws.value).toISOString();
+  return s;
+}
+
+// Compare the current state with what was last synced; stamp anything new or changed.
+function trackChanges() {
+  if (!sync.url) return;
+  const now = Date.now();
+  const seen = new Set();
+  for (const r of stateToRecords(state)) {
+    const k = recKey(r);
+    seen.add(k);
+    const h = hashRec(r);
+    const st = sync.stamps[k];
+    if (!st || st.h !== h) {
+      sync.stamps[k] = { h, t: now, v: (st ? st.v : 0) + 1, dirty: true };
+      sync.tombs = sync.tombs.filter((t) => recKey(t) !== k);
+    }
+  }
+  for (const k of Object.keys(sync.stamps)) {
+    if (seen.has(k)) continue;
+    const i = k.indexOf(':');
+    sync.tombs.push({ collection: k.slice(0, i), id: k.slice(i + 1), updatedAt: now });
+    delete sync.stamps[k];
+  }
+  saveSyncMeta();
+}
+
+function scheduleSync() {
+  if (!sync.url) return;
+  renderSyncStatus();
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, 1500);
+}
+
+async function callSheet(url, records) {
+  let res;
+  try {
+    // text/plain keeps this a "simple" request, which Apps Script accepts from other sites.
+    res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ records }) });
+  } catch {
+    throw new Error(navigator.onLine === false ? 'offline' : 'Could not reach the Google Sheet.');
+  }
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error('The Google Sheet link didn\'t answer correctly. Check the web app is deployed with access set to "Anyone".'); }
+  if (!data.ok) throw new Error('Google Sheet error: ' + data.error);
+  return data;
+}
+
+// Fold the sheet's answer into local state, keeping anything changed here while the request was out.
+function applyResponse(resp, sentVersions, sentTombKeys) {
+  sync.tombs = sync.tombs.filter((t) => !sentTombKeys.has(recKey(t)));
+  const pendingTombs = new Set(sync.tombs.map(recKey));
+  const local = new Map(stateToRecords(state).map((r) => [recKey(r), r]));
+  const keepLocal = new Set(Object.entries(sync.stamps)
+    .filter(([k, st]) => st.dirty && sentVersions[k] !== st.v)
+    .map(([k]) => k));
+
+  const server = new Map(resp.records.map((r) => [recKey(r), r]));
+  const merged = [];
+  for (const [k, r] of server) {
+    if (pendingTombs.has(k)) continue;
+    merged.push(keepLocal.has(k) && local.has(k) ? local.get(k) : r);
+  }
+  for (const k of keepLocal) if (!server.has(k) && local.has(k)) merged.push(local.get(k));
+
+  const next = { ...recordsToState(merged), version: state.version, updatedAt: state.updatedAt };
+  const stamps = {};
+  for (const r of stateToRecords(next)) {
+    const k = recKey(r);
+    stamps[k] = keepLocal.has(k) && sync.stamps[k]
+      ? sync.stamps[k]
+      : { h: hashRec(r), t: Number((server.get(k) || {}).updatedAt) || Date.now(), v: 0, dirty: false };
+  }
+  sync.stamps = stamps;
+  const changed = JSON.stringify(stateToRecords(next)) !== JSON.stringify(stateToRecords(state));
+  state = next;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (changed) render();
+}
+
+async function syncNow() {
+  if (!sync.url) return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  clearTimeout(syncTimer);
+  renderSyncStatus();
+  try {
+    const sentTombKeys = new Set(sync.tombs.map(recKey));
+    const records = sync.tombs.map((t) => ({ ...t, deleted: true }));
+    const sentVersions = {};
+    for (const r of stateToRecords(state)) {
+      const k = recKey(r);
+      const st = sync.stamps[k];
+      if (st && st.dirty) { records.push({ ...r, updatedAt: st.t }); sentVersions[k] = st.v; }
+    }
+    const resp = await callSheet(sync.url, records);
+    sync.sheetUrl = resp.sheetUrl;
+    applyResponse(resp, sentVersions, sentTombKeys);
+    sync.lastSync = Date.now();
+    sync.error = null;
+  } catch (err) {
+    sync.error = err.message;
+  } finally {
+    syncing = false;
+    saveSyncMeta();
+    renderSyncStatus();
+    if (syncAgain) { syncAgain = false; syncNow(); }
+  }
+}
+
+function isEmpty(s) {
+  return !s.list.length && !s.staples.length && !s.meals.length;
+}
+
+async function connectSheet() {
+  const url = $('#sheet-url').value.trim();
+  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) {
+    alert('That doesn\'t look like an Apps Script web app link. It should start with https://script.google.com/');
+    return;
+  }
+  const btn = $('#sheet-connect');
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  try {
+    const resp = await callSheet(url, []);
+    const hasData = resp.records.some((r) => ['List', 'Staples', 'Meals'].includes(r.collection));
+    sync = { url, sheetUrl: resp.sheetUrl, stamps: {}, tombs: [], lastSync: null, error: null };
+    if (hasData && (isEmpty(state) || confirm(
+      'The Google Sheet already has groceries in it.\n\n' +
+      'OK: use the sheet\'s data on this phone (recommended for a second phone).\n' +
+      'Cancel: combine this phone\'s data with the sheet.'))) {
+      applyResponse(resp, {}, new Set());
+      sync.lastSync = Date.now();
+      saveSyncMeta();
+      render();
+      toast('Connected. Loaded from Google Sheet');
+    } else {
+      trackChanges(); // everything on this phone is new to the sheet
+      await syncNow();
+      render();
+      toast(sync.error ? 'Connected, but the first sync failed' : 'Connected to Google Sheet');
+    }
+  } catch (err) {
+    alert(err.message === 'offline' ? 'You\'re offline. Connect to the internet and try again.' : err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Connect';
+  }
+}
+
+function disconnectSheet() {
+  if (!confirm('Stop syncing with the Google Sheet? Your data stays on this phone and in the sheet.')) return;
+  sync = { stamps: {}, tombs: [] };
+  saveSyncMeta();
+  render();
+  toast('Disconnected from Google Sheet');
 }
 
 function describeTime(ts) {
@@ -525,232 +734,48 @@ function describeTime(ts) {
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins} min ago`;
   const d = new Date(ts);
-  const sameDay = d.toDateString() === new Date().toDateString();
-  return sameDay
+  return d.toDateString() === new Date().toDateString()
     ? 'today at ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-function loadGoogleScript() {
-  if (!CLIENT_ID || document.getElementById('gis')) return;
-  const sc = document.createElement('script');
-  sc.id = 'gis'; sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true;
-  document.head.append(sc);
-}
+function renderSyncStatus() {
+  const badge = $('#sync-badge');
+  const connected = !!sync.url;
+  $('#sheet-setup').hidden = connected;
+  $('#sheet-connected').hidden = !connected;
+  const link = $('#sheet-open');
+  link.hidden = !sync.sheetUrl;
+  if (sync.sheetUrl) link.href = sync.sheetUrl;
 
-function validToken() {
-  return drive.token && drive.tokenExp > Date.now() + 60000 ? drive.token : null;
-}
-
-// Must be called directly from a tap so the Google sign-in popup isn't blocked.
-function requestToken() {
-  return new Promise((resolve, reject) => {
-    if (!(window.google && google.accounts && google.accounts.oauth2)) {
-      reject(new Error('Google sign-in is still loading. Check your connection and try again.'));
-      return;
-    }
-    const client = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: DRIVE_SCOPE,
-      callback: (r) => {
-        if (r.error) return reject(new Error(r.error_description || r.error));
-        drive.token = r.access_token;
-        drive.tokenExp = Date.now() + Number(r.expires_in || 3600) * 1000;
-        saveDriveMeta();
-        resolve(r.access_token);
-      },
-      error_callback: (e) => reject(new Error(e && e.type === 'popup_closed' ? 'Sign-in was cancelled.' : 'Google sign-in failed.')),
-    });
-    client.requestAccessToken({ prompt: drive.connected ? '' : 'consent' });
-  });
-}
-
-async function driveFetch(url, opts = {}) {
-  const res = await fetch(url, {
-    ...opts,
-    headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + drive.token },
-  });
-  if (res.status === 401) {
-    drive.token = null; saveDriveMeta();
-    throw new Error('Google sign-in expired. Tap to sign in again.');
-  }
-  return res;
-}
-
-async function findDriveFile() {
-  if (drive.fileId) {
-    const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${drive.fileId}?fields=id,trashed,modifiedTime`);
-    if (r.ok) { const f = await r.json(); if (!f.trashed) return f; }
-  }
-  const q = encodeURIComponent(`name='${DRIVE_FILE}' and trashed=false`);
-  const r = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&fields=files(id,modifiedTime)`);
-  if (!r.ok) throw new Error('Could not reach Google Drive.');
-  const f = (await r.json()).files[0] || null;
-  drive.fileId = f ? f.id : null;
-  saveDriveMeta();
-  return f;
-}
-
-async function uploadToDrive() {
-  const body = JSON.stringify(state, null, 2);
-  if (!drive.fileId) {
-    const r = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: DRIVE_FILE, mimeType: 'application/json' }),
-    });
-    if (!r.ok) throw new Error('Could not create the backup file in Google Drive.');
-    drive.fileId = (await r.json()).id;
-  }
-  let r = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${drive.fileId}?uploadType=media`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body,
-  });
-  if (r.status === 404) { drive.fileId = null; return uploadToDrive(); } // file was deleted in Drive
-  if (!r.ok) throw new Error('Google Drive backup failed.');
-  drive.lastBackup = Date.now();
-  drive.pending = false;
-  drive.error = null;
-  saveDriveMeta();
-}
-
-async function downloadFromDrive(fileId) {
-  const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
-  if (!r.ok) throw new Error('Could not download the backup from Google Drive.');
-  const data = await r.json();
-  if (!Array.isArray(data.list) || !Array.isArray(data.meals)) throw new Error('The Drive file is not a valid backup.');
-  return data;
-}
-
-function scheduleDriveBackup() {
-  if (!drive.connected) return;
-  drive.pending = true;
-  localStorage.setItem(DRIVE_KEY, JSON.stringify(drive));
-  clearTimeout(driveTimer);
-  driveTimer = setTimeout(() => backupToDrive(false), 2000);
-}
-
-async function backupToDrive(interactive) {
-  if (!drive.connected || driveBusy) return;
-  try {
-    driveBusy = true;
-    if (!validToken()) {
-      if (!interactive) { renderBackupStatus(); return; }
-      await requestToken();
-    }
-    await uploadToDrive();
-    if (interactive) toast('Backed up to Google Drive');
-  } catch (err) {
-    drive.error = err.message; saveDriveMeta();
-    if (interactive) alert(err.message);
-  } finally {
-    driveBusy = false;
-  }
-}
-
-function isEmpty(s) {
-  return !s.list.length && !s.staples.length && !s.meals.length;
-}
-
-async function connectDrive() {
-  try {
-    await requestToken();
-    drive.connected = true;
-    saveDriveMeta();
-    const file = await findDriveFile();
-    if (file) {
-      const remote = await downloadFromDrive(file.id);
-      const useRemote = isEmpty(state) || confirm(
-        `Found a Google Drive backup from ${describeTime(remote.updatedAt)}.\n\n` +
-        'OK: replace this phone\'s data with the Drive backup.\n' +
-        'Cancel: keep this phone\'s data and save it to Drive.');
-      if (useRemote) {
-        state = { ...defaultState(), ...remote };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        drive.lastBackup = remote.updatedAt || Date.now();
-        drive.pending = false;
-        saveDriveMeta();
-        render();
-        toast('Restored from Google Drive');
-        return;
-      }
-    }
-    await uploadToDrive();
-    toast('Google Drive backup is on');
-  } catch (err) {
-    alert(err.message);
-  }
-}
-
-async function restoreFromDrive() {
-  try {
-    if (!validToken()) await requestToken();
-    const file = await findDriveFile();
-    if (!file) return alert('No backup found in Google Drive yet.');
-    const remote = await downloadFromDrive(file.id);
-    if (!confirm(`Replace everything on this phone with the Google Drive backup from ${describeTime(remote.updatedAt)}?`)) return;
-    withUndo('Restored from Google Drive', () => { state = { ...defaultState(), ...remote }; });
-  } catch (err) {
-    alert(err.message);
-  }
-}
-
-function disconnectDrive() {
-  if (!confirm('Stop backing up to Google Drive? The backup file already in Drive is kept.')) return;
-  if (drive.token && window.google && google.accounts) google.accounts.oauth2.revoke(drive.token, () => {});
-  drive = {};
-  saveDriveMeta();
-  toast('Google Drive backup turned off');
-}
-
-function renderBackupStatus() {
-  const status = $('#drive-status');
-  const pill = $('#backup-pill');
-  if (!status) return;
-  const show = (id, on) => { $(id).hidden = !on; };
-
-  if (!CLIENT_ID) {
-    status.textContent = 'Google Drive backup hasn\'t been set up for this app yet (it needs a Google Client ID in config.js).';
-    ['#drive-connect', '#drive-backup', '#drive-restore', '#drive-disconnect'].forEach((id) => show(id, false));
-    pill.hidden = true;
+  if (!connected) {
+    badge.hidden = true;
+    $('#sheet-status').textContent = 'Not connected. Connect a Google Sheet to back up your data and share one list with the whole family.';
     return;
   }
-  show('#drive-connect', !drive.connected);
-  show('#drive-backup', !!drive.connected);
-  show('#drive-restore', !!drive.connected);
-  show('#drive-disconnect', !!drive.connected);
-
-  if (!drive.connected) {
-    status.textContent = 'Connect Google Drive to back up automatically after every change. Restore on any device by connecting the same Google account.';
-    pill.hidden = true;
-    return;
-  }
-  const last = drive.lastBackup ? `Last backup: ${describeTime(drive.lastBackup)}.` : 'Not backed up yet.';
-  status.textContent = drive.pending
-    ? `${last} Some changes aren't backed up yet.`
-    : `Backing up automatically. ${last}`;
-
-  // Banner on the List tab when changes are waiting and we need a tap to sign in again.
-  const needsTap = drive.pending && !validToken();
-  pill.hidden = !needsTap;
-  if (needsTap) pill.textContent = '☁️ Changes not backed up to Google Drive. Tap to back up.';
+  const pending = Object.values(sync.stamps).some((st) => st.dirty) || sync.tombs.length > 0;
+  let label; let detail;
+  if (syncing) { label = '⟳ Syncing'; detail = 'Syncing now…'; }
+  else if (sync.error === 'offline') { label = '⚠️ Offline'; detail = 'Offline. Changes are saved on this phone and will sync when you\'re back online.'; }
+  else if (sync.error) { label = '⚠️ Not synced'; detail = sync.error; }
+  else if (pending) { label = '⟳ Saving'; detail = 'Saving changes to the sheet…'; }
+  else { label = '✓ Synced'; detail = `Synced with Google Sheet ${describeTime(sync.lastSync)}.`; }
+  badge.hidden = false;
+  badge.textContent = label;
+  badge.classList.toggle('warn', !!sync.error && !syncing);
+  $('#sheet-status').textContent = detail;
 }
 
-$('#drive-connect').addEventListener('click', connectDrive);
-$('#drive-backup').addEventListener('click', () => backupToDrive(true));
-$('#drive-restore').addEventListener('click', restoreFromDrive);
-$('#drive-disconnect').addEventListener('click', disconnectDrive);
-$('#backup-pill').addEventListener('click', () => backupToDrive(true));
+$('#sheet-connect').addEventListener('click', connectSheet);
+$('#sheet-sync').addEventListener('click', syncNow);
+$('#sheet-disconnect').addEventListener('click', disconnectSheet);
+$('#sync-badge').addEventListener('click', () => { syncNow(); });
 
-// Flush right away when the app is closed or switched away from (iOS may suspend it).
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && drive.pending && validToken()) {
-    clearTimeout(driveTimer);
-    backupToDrive(false);
-  }
-});
-
-loadGoogleScript();
-if (drive.connected && drive.pending) setTimeout(() => backupToDrive(false), 1500);
+// Pick up changes from other phones: when the app comes to the front, and every 30 seconds while open.
+document.addEventListener('visibilitychange', () => { if (sync.url) syncNow(); });
+window.addEventListener('online', () => { if (sync.url) syncNow(); });
+setInterval(() => { if (sync.url && document.visibilityState === 'visible') syncNow(); }, SYNC_INTERVAL);
+if (sync.url) setTimeout(syncNow, 300);
 
 // Ask the browser not to clear this app's storage when space runs low.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -758,6 +783,7 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 // Keep multiple open tabs in sync.
 window.addEventListener('storage', (e) => {
   if (e.key === STORAGE_KEY) { state = load(); render(); }
+  if (e.key === SYNC_KEY) { sync = loadSyncMeta(); renderSyncStatus(); }
 });
 
 // Support links like ?add=milk,eggs (handy for an iPhone Shortcut).
