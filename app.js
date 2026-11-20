@@ -48,7 +48,9 @@ function load() {
 }
 
 function save() {
+  state.updatedAt = Date.now();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  scheduleDriveBackup();
 }
 
 function commit() { save(); render(); }
@@ -201,6 +203,7 @@ function render() {
   renderList();
   renderStaples();
   renderMeals();
+  renderBackupStatus();
 }
 
 function renderWeekLabel() {
@@ -460,9 +463,16 @@ $('#new-week').addEventListener('click', () => {
   withUndo('New week started', startNewWeek);
 });
 
-$('#export').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-  const a = el('a', { href: URL.createObjectURL(blob), download: `groceries-backup-${new Date().toISOString().slice(0, 10)}.json` });
+$('#export').addEventListener('click', async () => {
+  // On iPhone this opens the share sheet, where "Save to Files" can put it in iCloud Drive.
+  const name = `groceries-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  const json = JSON.stringify(state, null, 2);
+  const file = new File([json], name, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Groceries backup' }); return; }
+    catch (err) { if (err.name === 'AbortError') return; }
+  }
+  const a = el('a', { href: URL.createObjectURL(file), download: name });
   document.body.append(a); a.click(); a.remove();
 });
 
@@ -472,7 +482,8 @@ $('#import').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.list) || !Array.isArray(data.meals)) throw new Error('Not a backup file');
-    withUndo('Backup imported', () => { state = { ...defaultState(), ...data }; });
+    if (!confirm(`Replace everything on this device with the backup from ${describeTime(data.updatedAt)}?`)) return;
+    withUndo('Backup restored', () => { state = { ...defaultState(), ...data }; });
   } catch (err) {
     alert('Could not import: ' + err.message);
   }
@@ -483,6 +494,266 @@ $('#reset-all').addEventListener('click', () => {
   if (!confirm('Erase all staples, meals, and your list on this device?')) return;
   withUndo('Everything erased', () => { state = defaultState(); });
 });
+
+
+/* ---------- Google Drive backup ---------- */
+// Saves the whole app state to "groceries-backup.json" in the user's Google Drive
+// (drive.file scope: the app can only see files it created). Changes are uploaded
+// a couple of seconds after they happen while a sign-in token is valid (~1 hour);
+// after that, a banner asks for a tap to sign in again and finish the backup.
+
+const DRIVE_KEY = 'groceries.drive';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_FILE = 'groceries-backup.json';
+const CLIENT_ID = ((window.GROCERIES_CONFIG || {}).googleClientId || '').trim();
+
+let drive = loadDriveMeta();
+let driveTimer = null;
+let driveBusy = false;
+
+function loadDriveMeta() {
+  try { return JSON.parse(localStorage.getItem(DRIVE_KEY)) || {}; } catch { return {}; }
+}
+function saveDriveMeta() {
+  localStorage.setItem(DRIVE_KEY, JSON.stringify(drive));
+  renderBackupStatus();
+}
+
+function describeTime(ts) {
+  if (!ts) return 'an unknown date';
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const d = new Date(ts);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? 'today at ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function loadGoogleScript() {
+  if (!CLIENT_ID || document.getElementById('gis')) return;
+  const sc = document.createElement('script');
+  sc.id = 'gis'; sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true;
+  document.head.append(sc);
+}
+
+function validToken() {
+  return drive.token && drive.tokenExp > Date.now() + 60000 ? drive.token : null;
+}
+
+// Must be called directly from a tap so the Google sign-in popup isn't blocked.
+function requestToken() {
+  return new Promise((resolve, reject) => {
+    if (!(window.google && google.accounts && google.accounts.oauth2)) {
+      reject(new Error('Google sign-in is still loading. Check your connection and try again.'));
+      return;
+    }
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: (r) => {
+        if (r.error) return reject(new Error(r.error_description || r.error));
+        drive.token = r.access_token;
+        drive.tokenExp = Date.now() + Number(r.expires_in || 3600) * 1000;
+        saveDriveMeta();
+        resolve(r.access_token);
+      },
+      error_callback: (e) => reject(new Error(e && e.type === 'popup_closed' ? 'Sign-in was cancelled.' : 'Google sign-in failed.')),
+    });
+    client.requestAccessToken({ prompt: drive.connected ? '' : 'consent' });
+  });
+}
+
+async function driveFetch(url, opts = {}) {
+  const res = await fetch(url, {
+    ...opts,
+    headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + drive.token },
+  });
+  if (res.status === 401) {
+    drive.token = null; saveDriveMeta();
+    throw new Error('Google sign-in expired. Tap to sign in again.');
+  }
+  return res;
+}
+
+async function findDriveFile() {
+  if (drive.fileId) {
+    const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${drive.fileId}?fields=id,trashed,modifiedTime`);
+    if (r.ok) { const f = await r.json(); if (!f.trashed) return f; }
+  }
+  const q = encodeURIComponent(`name='${DRIVE_FILE}' and trashed=false`);
+  const r = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&fields=files(id,modifiedTime)`);
+  if (!r.ok) throw new Error('Could not reach Google Drive.');
+  const f = (await r.json()).files[0] || null;
+  drive.fileId = f ? f.id : null;
+  saveDriveMeta();
+  return f;
+}
+
+async function uploadToDrive() {
+  const body = JSON.stringify(state, null, 2);
+  if (!drive.fileId) {
+    const r = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: DRIVE_FILE, mimeType: 'application/json' }),
+    });
+    if (!r.ok) throw new Error('Could not create the backup file in Google Drive.');
+    drive.fileId = (await r.json()).id;
+  }
+  let r = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${drive.fileId}?uploadType=media`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body,
+  });
+  if (r.status === 404) { drive.fileId = null; return uploadToDrive(); } // file was deleted in Drive
+  if (!r.ok) throw new Error('Google Drive backup failed.');
+  drive.lastBackup = Date.now();
+  drive.pending = false;
+  drive.error = null;
+  saveDriveMeta();
+}
+
+async function downloadFromDrive(fileId) {
+  const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  if (!r.ok) throw new Error('Could not download the backup from Google Drive.');
+  const data = await r.json();
+  if (!Array.isArray(data.list) || !Array.isArray(data.meals)) throw new Error('The Drive file is not a valid backup.');
+  return data;
+}
+
+function scheduleDriveBackup() {
+  if (!drive.connected) return;
+  drive.pending = true;
+  localStorage.setItem(DRIVE_KEY, JSON.stringify(drive));
+  clearTimeout(driveTimer);
+  driveTimer = setTimeout(() => backupToDrive(false), 2000);
+}
+
+async function backupToDrive(interactive) {
+  if (!drive.connected || driveBusy) return;
+  try {
+    driveBusy = true;
+    if (!validToken()) {
+      if (!interactive) { renderBackupStatus(); return; }
+      await requestToken();
+    }
+    await uploadToDrive();
+    if (interactive) toast('Backed up to Google Drive');
+  } catch (err) {
+    drive.error = err.message; saveDriveMeta();
+    if (interactive) alert(err.message);
+  } finally {
+    driveBusy = false;
+  }
+}
+
+function isEmpty(s) {
+  return !s.list.length && !s.staples.length && !s.meals.length;
+}
+
+async function connectDrive() {
+  try {
+    await requestToken();
+    drive.connected = true;
+    saveDriveMeta();
+    const file = await findDriveFile();
+    if (file) {
+      const remote = await downloadFromDrive(file.id);
+      const useRemote = isEmpty(state) || confirm(
+        `Found a Google Drive backup from ${describeTime(remote.updatedAt)}.\n\n` +
+        'OK: replace this phone\'s data with the Drive backup.\n' +
+        'Cancel: keep this phone\'s data and save it to Drive.');
+      if (useRemote) {
+        state = { ...defaultState(), ...remote };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        drive.lastBackup = remote.updatedAt || Date.now();
+        drive.pending = false;
+        saveDriveMeta();
+        render();
+        toast('Restored from Google Drive');
+        return;
+      }
+    }
+    await uploadToDrive();
+    toast('Google Drive backup is on');
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function restoreFromDrive() {
+  try {
+    if (!validToken()) await requestToken();
+    const file = await findDriveFile();
+    if (!file) return alert('No backup found in Google Drive yet.');
+    const remote = await downloadFromDrive(file.id);
+    if (!confirm(`Replace everything on this phone with the Google Drive backup from ${describeTime(remote.updatedAt)}?`)) return;
+    withUndo('Restored from Google Drive', () => { state = { ...defaultState(), ...remote }; });
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+function disconnectDrive() {
+  if (!confirm('Stop backing up to Google Drive? The backup file already in Drive is kept.')) return;
+  if (drive.token && window.google && google.accounts) google.accounts.oauth2.revoke(drive.token, () => {});
+  drive = {};
+  saveDriveMeta();
+  toast('Google Drive backup turned off');
+}
+
+function renderBackupStatus() {
+  const status = $('#drive-status');
+  const pill = $('#backup-pill');
+  if (!status) return;
+  const show = (id, on) => { $(id).hidden = !on; };
+
+  if (!CLIENT_ID) {
+    status.textContent = 'Google Drive backup hasn\'t been set up for this app yet (it needs a Google Client ID in config.js).';
+    ['#drive-connect', '#drive-backup', '#drive-restore', '#drive-disconnect'].forEach((id) => show(id, false));
+    pill.hidden = true;
+    return;
+  }
+  show('#drive-connect', !drive.connected);
+  show('#drive-backup', !!drive.connected);
+  show('#drive-restore', !!drive.connected);
+  show('#drive-disconnect', !!drive.connected);
+
+  if (!drive.connected) {
+    status.textContent = 'Connect Google Drive to back up automatically after every change. Restore on any device by connecting the same Google account.';
+    pill.hidden = true;
+    return;
+  }
+  const last = drive.lastBackup ? `Last backup: ${describeTime(drive.lastBackup)}.` : 'Not backed up yet.';
+  status.textContent = drive.pending
+    ? `${last} Some changes aren't backed up yet.`
+    : `Backing up automatically. ${last}`;
+
+  // Banner on the List tab when changes are waiting and we need a tap to sign in again.
+  const needsTap = drive.pending && !validToken();
+  pill.hidden = !needsTap;
+  if (needsTap) pill.textContent = '☁️ Changes not backed up to Google Drive. Tap to back up.';
+}
+
+$('#drive-connect').addEventListener('click', connectDrive);
+$('#drive-backup').addEventListener('click', () => backupToDrive(true));
+$('#drive-restore').addEventListener('click', restoreFromDrive);
+$('#drive-disconnect').addEventListener('click', disconnectDrive);
+$('#backup-pill').addEventListener('click', () => backupToDrive(true));
+
+// Flush right away when the app is closed or switched away from (iOS may suspend it).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && drive.pending && validToken()) {
+    clearTimeout(driveTimer);
+    backupToDrive(false);
+  }
+});
+
+loadGoogleScript();
+if (drive.connected && drive.pending) setTimeout(() => backupToDrive(false), 1500);
+
+// Ask the browser not to clear this app's storage when space runs low.
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
 // Keep multiple open tabs in sync.
 window.addEventListener('storage', (e) => {

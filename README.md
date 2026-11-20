@@ -15,4 +15,19 @@ It's plain HTML/CSS/JS with no build step. Any static host works (for example, G
 
     python3 -m http.server 8000
 
-Data is stored in the browser's localStorage on each device. Use **More → Export/Import backup** to move it between devices.
+## Backups
+
+Data lives in the browser's storage on each device, plus:
+
+- **Google Drive (automatic):** once connected under **More**, every change is saved to `groceries-backup.json` in your Google Drive. Connect the same Google account on a new phone to restore. Google sign-in lasts about an hour; after that, a banner on the List tab asks for one tap to sign in again and finish the backup.
+- **iCloud / file (manual):** **More → Save backup** opens the iPhone share sheet. Choose "Save to Files" → iCloud Drive. **Restore from file** loads it back.
+
+### Setting up Google Drive backup (one time)
+
+1. Go to https://console.cloud.google.com and create a project (e.g. "Groceries").
+2. **APIs & Services → Library**: search for **Google Drive API** and click **Enable**.
+3. **Google Auth Platform** (called "OAuth consent screen" in older versions of the console): click **Get started**. Enter the app name and your email, choose **External**, and finish.
+4. **Audience**: add the Gmail address of each family member who will use the app as a **test user**.
+5. **Data Access → Add or remove scopes**: add `https://www.googleapis.com/auth/drive.file` and save.
+6. **Clients → Create client**: choose **Web application**. Under **Authorized JavaScript origins**, add `https://dreadcaptjames.github.io`, then create it.
+7. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`) into `config.js`. It isn't a secret.

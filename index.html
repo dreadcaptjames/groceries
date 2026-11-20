@@ -29,6 +29,8 @@
       </form>
       <datalist id="known-items"></datalist>
 
+      <button id="backup-pill" class="backup-pill" type="button" hidden></button>
+
       <div id="recent" class="chips" aria-label="Quick re-add"></div>
 
       <div id="list-summary" class="summary"></div>
@@ -63,11 +65,20 @@
       <h2>Harris Teeter</h2>
       <p class="hint">Each list item has a 🔍 button that opens a Harris Teeter search for it, so you can add it to your cart.</p>
 
-      <h2>Backup &amp; move to another device</h2>
-      <p class="hint">Your list is saved on this device. Use these to back it up or copy it to another phone.</p>
+      <h2>Google Drive backup</h2>
+      <p id="drive-status" class="hint"></p>
+      <div class="actions" id="drive-actions">
+        <button id="drive-connect" class="btn primary">Connect Google Drive</button>
+        <button id="drive-backup" class="btn">Back up now</button>
+        <button id="drive-restore" class="btn">Restore from Google Drive</button>
+        <button id="drive-disconnect" class="btn danger">Disconnect</button>
+      </div>
+
+      <h2>iCloud / file backup</h2>
+      <p class="hint">Tap “Save backup”, then choose “Save to Files” and pick iCloud Drive. To restore, tap “Restore from file” and pick that file.</p>
       <div class="actions">
-        <button id="export" class="btn">Export backup</button>
-        <label class="btn">Import backup<input id="import" type="file" accept="application/json" hidden></label>
+        <button id="export" class="btn">Save backup</button>
+        <label class="btn">Restore from file<input id="import" type="file" accept="application/json,.json" hidden></label>
       </div>
 
       <h2>Install on your phone</h2>
@@ -113,6 +124,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

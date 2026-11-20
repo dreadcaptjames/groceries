@@ -115,3 +115,13 @@ dialog label input, dialog label textarea { margin-top: 4px; font-weight: normal
 }
 .toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
 .toast button { background: none; border: none; color: var(--green); font: inherit; font-weight: 700; cursor: pointer; }
+
+.backup-pill {
+  display: block; width: 100%; margin: 0 0 10px; padding: 10px 12px; text-align: left;
+  font: inherit; font-size: 14px; cursor: pointer; border-radius: var(--radius);
+  border: 1px solid #e3b341; background: #fff8e1; color: #6b4e00;
+}
+@media (prefers-color-scheme: dark) {
+  .backup-pill { background: #3a3013; color: #f3d98b; border-color: #7a6320; }
+}
+[hidden] { display: none !important; }
