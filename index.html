@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Groceries</title>
-  <meta name="theme-color" content="#2f6b3a">
+  <meta name="theme-color" content="#f5f5f0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Groceries">
@@ -14,118 +15,163 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="top">
-    <h1>Groceries</h1>
-    <span class="header-right">
-      <button id="sync-badge" class="sync-badge" type="button" hidden title="Sync now"></button>
-      <span id="week-label" class="muted"></span>
-    </span>
-  </header>
-
   <main>
-    <!-- ===== LIST TAB ===== -->
-    <section id="tab-list" class="tab active">
-      <form id="quick-add" class="quick-add" autocomplete="off">
-        <label for="quick-input" class="sr-only">Add an item</label>
-        <input id="quick-input" list="known-items" placeholder="Ran out of something?" enterkeyhint="done">
-        <button type="submit" class="btn primary">Add</button>
-      </form>
+    <!-- ===== LIST ===== -->
+    <section id="tab-list" class="tab active" aria-labelledby="list-title">
+      <header class="page-head">
+        <div>
+          <p id="week-label" class="eyebrow"></p>
+          <h1 id="list-title">Groceries</h1>
+        </div>
+        <button id="sync-badge" class="sync-badge" type="button" hidden title="Sync now"></button>
+      </header>
+
+      <div class="add-bar">
+        <form id="quick-add" class="add-field" autocomplete="off">
+          <i data-icon="plus" class="add-icon"></i>
+          <label for="quick-input" class="sr-only">Add an item</label>
+          <input id="quick-input" list="known-items" placeholder="Add an item…" enterkeyhint="done">
+          <button type="submit" class="add-submit">Add</button>
+        </form>
+      </div>
       <datalist id="known-items"></datalist>
 
-      <div id="recent" class="chips" aria-label="Quick re-add"></div>
+      <div id="recent-wrap" class="recent">
+        <p class="section-label">Buy again</p>
+        <div id="recent" class="chips" aria-label="Buy again"></div>
+      </div>
 
-      <div id="list-summary" class="summary"></div>
+      <div id="progress" class="progress" hidden>
+        <div class="progress-text"><span id="list-summary"></span><span id="list-count" class="muted"></span></div>
+        <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+      </div>
+
       <div id="list"></div>
 
-      <div class="actions">
-        <button id="copy-list" class="btn">Copy list</button>
-        <button id="clear-checked" class="btn">Remove checked</button>
-        <button id="new-week" class="btn danger">Start new week</button>
+      <div id="list-actions" class="list-actions">
+        <button id="copy-list" class="ghost-btn" type="button"><i data-icon="copy"></i>Copy list</button>
+        <button id="clear-checked" class="ghost-btn" type="button"><i data-icon="check"></i>Clear cart</button>
+        <button id="new-week" class="ghost-btn" type="button"><i data-icon="refresh"></i>New week</button>
       </div>
     </section>
 
-    <!-- ===== STAPLES TAB ===== -->
-    <section id="tab-staples" class="tab">
-      <p class="hint">Things you buy every week. They're added to the list automatically when you start a new week.</p>
-      <form id="staple-add" class="quick-add" autocomplete="off">
-        <input id="staple-input" list="known-items" placeholder="Add a weekly staple">
-        <button type="submit" class="btn primary">Add</button>
-      </form>
-      <ul id="staples" class="plain"></ul>
+    <!-- ===== STAPLES ===== -->
+    <section id="tab-staples" class="tab" aria-labelledby="staples-title">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Every week</p>
+          <h1 id="staples-title">Staples</h1>
+        </div>
+      </header>
+      <p class="intro">These go back on your list automatically each time you start a new week.</p>
+      <div class="add-bar">
+        <form id="staple-add" class="add-field" autocomplete="off">
+          <i data-icon="plus" class="add-icon"></i>
+          <label for="staple-input" class="sr-only">Add a staple</label>
+          <input id="staple-input" list="known-items" placeholder="Add a staple…" enterkeyhint="done">
+          <button type="submit" class="add-submit">Add</button>
+        </form>
+      </div>
+      <div id="staples"></div>
     </section>
 
-    <!-- ===== MEALS TAB ===== -->
-    <section id="tab-meals" class="tab">
-      <p class="hint">Pick this week's meals and their ingredients go on the list. Tap a meal to edit it.</p>
+    <!-- ===== MEALS ===== -->
+    <section id="tab-meals" class="tab" aria-labelledby="meals-title">
+      <header class="page-head">
+        <div>
+          <p id="meals-eyebrow" class="eyebrow">This week</p>
+          <h1 id="meals-title">Meals</h1>
+        </div>
+        <button id="new-meal" class="round-btn" type="button" aria-label="New meal" title="New meal"><i data-icon="plus"></i></button>
+      </header>
+      <p class="intro">Pick what you're cooking and the ingredients go on your list. Tap a meal to edit it.</p>
       <div id="meals"></div>
-      <button id="new-meal" class="btn primary wide">+ New meal</button>
     </section>
 
-    <!-- ===== MORE TAB ===== -->
-    <section id="tab-more" class="tab">
-      <h2>Harris Teeter</h2>
-      <p class="hint">Each list item has a 🔍 button that opens a Harris Teeter search for it, so you can add it to your cart.</p>
+    <!-- ===== MORE ===== -->
+    <section id="tab-more" class="tab" aria-labelledby="more-title">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Settings</p>
+          <h1 id="more-title">More</h1>
+        </div>
+      </header>
 
-      <h2>Google Sheet</h2>
-      <p id="sheet-status" class="hint"></p>
-      <div id="sheet-setup">
-        <p class="hint">Paste the web app link from your sheet's Apps Script (see the setup steps in the README).</p>
-        <div class="quick-add">
-          <input id="sheet-url" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
-          <button id="sheet-connect" class="btn primary" type="button">Connect</button>
+      <p class="section-label">Google Sheet</p>
+      <div class="card">
+        <div class="card-row">
+          <span id="sheet-dot" class="status-dot"></span>
+          <p id="sheet-status" class="card-text"></p>
+        </div>
+        <div id="sheet-setup" class="card-body">
+          <label for="sheet-url" class="field-label">Web app link from your sheet's Apps Script</label>
+          <input id="sheet-url" class="text-input" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button id="sheet-connect" class="primary-btn" type="button">Connect</button>
+        </div>
+        <div id="sheet-connected">
+          <button id="sheet-sync" class="menu-row" type="button"><i data-icon="refresh"></i>Sync now</button>
+          <a id="sheet-open" class="menu-row" target="_blank" rel="noopener"><i data-icon="external"></i>Open Google Sheet</a>
+          <button id="sheet-disconnect" class="menu-row danger" type="button"><i data-icon="unlink"></i>Disconnect</button>
         </div>
       </div>
-      <div id="sheet-connected" class="actions">
-        <button id="sheet-sync" class="btn" type="button">Sync now</button>
-        <a id="sheet-open" class="btn" target="_blank" rel="noopener">Open Google Sheet</a>
-        <button id="sheet-disconnect" class="btn danger" type="button">Disconnect</button>
+
+      <p class="section-label">Backup to iCloud or a file</p>
+      <div class="card">
+        <p class="card-text pad">An extra copy. After tapping Save backup, choose “Save to Files”, then iCloud Drive.</p>
+        <button id="export" class="menu-row" type="button"><i data-icon="download"></i>Save backup</button>
+        <label class="menu-row"><i data-icon="upload"></i>Restore from file<input id="import" type="file" accept="application/json,.json" hidden></label>
       </div>
 
-      <h2>iCloud / file backup</h2>
-      <p class="hint">The Google Sheet keeps your data safe, and this is an extra copy. Tap “Save backup”, then choose “Save to Files” and pick iCloud Drive. To restore, tap “Restore from file” and pick that file.</p>
-      <div class="actions">
-        <button id="export" class="btn">Save backup</button>
-        <label class="btn">Restore from file<input id="import" type="file" accept="application/json,.json" hidden></label>
+      <p class="section-label">Tips</p>
+      <div class="card">
+        <p class="card-text pad"><strong>Install it:</strong> in Safari, tap Share, then “Add to Home Screen”. It opens like an app and works offline.</p>
+        <p class="card-text pad"><strong>Harris Teeter:</strong> tap <i data-icon="search" class="inline-icon"></i> next to any item to search for it on harristeeter.com.</p>
       </div>
 
-      <h2>Install on your phone</h2>
-      <p class="hint">iPhone: open this page in Safari, tap Share, then “Add to Home Screen”. It then opens like an app, and works offline.</p>
-
-      <h2>Reset</h2>
-      <button id="reset-all" class="btn danger">Erase everything</button>
+      <div class="card">
+        <button id="reset-all" class="menu-row danger" type="button"><i data-icon="trash"></i>Erase everything on this phone</button>
+      </div>
     </section>
   </main>
 
-  <nav class="tabs">
-    <button data-tab="list" class="active">🛒<span>List</span></button>
-    <button data-tab="staples">🔁<span>Staples</span></button>
-    <button data-tab="meals">🍽️<span>Meals</span></button>
-    <button data-tab="more">⚙️<span>More</span></button>
+  <nav class="tabs" aria-label="Sections">
+    <button data-tab="list" class="active" type="button"><i data-icon="cart"></i><span>List</span><b id="tab-count" class="tab-count" hidden></b></button>
+    <button data-tab="staples" type="button"><i data-icon="repeat"></i><span>Staples</span></button>
+    <button data-tab="meals" type="button"><i data-icon="utensils"></i><span>Meals</span></button>
+    <button data-tab="more" type="button"><i data-icon="sliders"></i><span>More</span></button>
   </nav>
 
   <!-- Meal editor -->
-  <dialog id="meal-dialog">
+  <dialog id="meal-dialog" class="sheet">
     <form method="dialog" id="meal-form">
-      <h2 id="meal-dialog-title">Meal</h2>
-      <label>Name<input id="meal-name" required placeholder="Tacos"></label>
-      <label>Ingredients <span class="muted">(one per line)</span>
-        <textarea id="meal-ingredients" rows="8" placeholder="ground beef&#10;taco shells&#10;shredded cheese&#10;lettuce"></textarea>
-      </label>
-      <div class="actions">
-        <button type="button" id="meal-delete" class="btn danger">Delete</button>
-        <span class="spacer"></span>
-        <button type="button" id="meal-cancel" class="btn">Cancel</button>
-        <button type="submit" class="btn primary">Save</button>
+      <div class="sheet-grabber"></div>
+      <div class="sheet-head">
+        <button type="button" id="meal-cancel" class="text-btn">Cancel</button>
+        <h2 id="meal-dialog-title">Meal</h2>
+        <button type="submit" class="text-btn strong">Save</button>
       </div>
+      <label class="field-label" for="meal-name">Name</label>
+      <input id="meal-name" class="text-input" required placeholder="Tacos">
+      <label class="field-label" for="meal-ingredients">Ingredients, one per line</label>
+      <textarea id="meal-ingredients" class="text-input" rows="7" placeholder="ground beef&#10;taco shells&#10;shredded cheese&#10;lettuce"></textarea>
+      <button type="button" id="meal-delete" class="menu-row danger boxed"><i data-icon="trash"></i>Delete meal</button>
     </form>
   </dialog>
 
-  <!-- Category picker -->
-  <dialog id="cat-dialog">
+  <!-- Item actions -->
+  <dialog id="item-dialog" class="sheet">
     <form method="dialog">
-      <h2 id="cat-dialog-title">Aisle</h2>
-      <div id="cat-options" class="cat-grid"></div>
-      <div class="actions"><span class="spacer"></span><button class="btn" value="cancel">Cancel</button></div>
+      <div class="sheet-grabber"></div>
+      <div class="sheet-head">
+        <span></span>
+        <h2 id="item-dialog-title">Item</h2>
+        <button class="text-btn strong" value="cancel">Done</button>
+      </div>
+      <p id="item-dialog-meta" class="sheet-meta"></p>
+      <a id="item-search" class="menu-row boxed" target="_blank" rel="noopener"><i data-icon="search"></i>Search on Harris Teeter</a>
+      <p class="section-label">Aisle</p>
+      <div id="cat-options" class="aisle-grid"></div>
+      <button type="button" id="item-remove" class="menu-row danger boxed"><i data-icon="trash"></i><span id="item-remove-label">Remove from list</span></button>
     </form>
   </dialog>
 

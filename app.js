@@ -205,6 +205,54 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  cart: '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3.5h2.6l2.4 11.2a2 2 0 0 0 2 1.6h8.3a2 2 0 0 0 1.9-1.5L21.5 7.5H6"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  utensils: '<path d="M4 3v7a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V3"/><path d="M7 3v18"/><path d="M20 15V3a4 4 0 0 0-4 4v6a2 2 0 0 0 2 2h2Zm0 0v6"/>',
+  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/>',
+  trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-.9 13.1a2 2 0 0 1-2 1.9H7.9a2 2 0 0 1-2-1.9L5 6"/>',
+  external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  unlink: '<path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 4 8M8 12h4M2 2l20 20"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  upload: '<path d="M12 21V9M7 14l5-5 5 5M5 3h14"/>',
+  bag: '<path d="M6 7h12l1 14H5L6 7Z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/>',
+};
+
+function icon(name) {
+  const span = document.createElement('span');
+  span.className = 'icon-wrap';
+  span.style.display = 'contents';
+  span.innerHTML = `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+  return span.firstChild;
+}
+
+// Fill <i data-icon="…"> placeholders in the static HTML.
+document.querySelectorAll('i[data-icon]').forEach((i) => {
+  const svg = icon(i.dataset.icon);
+  if (i.className) svg.classList.add(...i.className.split(' '));
+  i.replaceWith(svg);
+});
+
+const MEAL_COLORS = ['#e07a5f', '#3d8b7d', '#8a6fdf', '#d4a017', '#4a90c2', '#c65b9b', '#5a9e4b', '#d9783d'];
+function mealColor(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return MEAL_COLORS[h % MEAL_COLORS.length];
+}
+
+function emptyState(iconName, title, text) {
+  return el('div', { class: 'empty' },
+    el('div', { class: 'empty-icon' }, icon(iconName)),
+    el('strong', {}, title),
+    el('span', {}, text));
+}
+
 function render() {
   renderWeekLabel();
   renderSuggestions();
@@ -216,7 +264,7 @@ function render() {
 
 function renderWeekLabel() {
   const d = new Date(state.weekStart);
-  $('#week-label').textContent = 'Week of ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  $('#week-label').textContent = 'Week of ' + d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
 }
 
 function renderSuggestions() {
@@ -227,115 +275,157 @@ function renderSuggestions() {
   state.meals.forEach((m) => m.ingredients.forEach((i) => names.set(keyOf(i), i)));
   $('#known-items').replaceChildren(...[...names.values()].sort().map((n) => el('option', { value: n })));
 
-  // "Usual items" chips: frequently added things not on the list right now.
+  // "Buy again": frequently added things not on the list right now.
   const onList = new Set(state.list.map((i) => keyOf(i.name)));
   const recent = Object.entries(state.history)
     .filter(([k]) => !onList.has(k))
     .sort((a, b) => b[1].count - a[1].count || b[1].last - a[1].last)
-    .slice(0, 10)
+    .slice(0, 12)
     .map(([, h]) => el('button', {
-      class: 'chip', type: 'button', title: 'Add to list',
+      class: 'chip', type: 'button', 'aria-label': `Add ${h.name}`,
       onclick: () => { addToList(h.name, 'added'); commit(); toast(`Added ${h.name}`); },
-    }, '+ ' + h.name));
+    }, icon('plus'), el('span', { class: 'cap' }, h.name)));
   $('#recent').replaceChildren(...recent);
+  $('#recent-wrap').hidden = recent.length === 0;
 }
 
 function renderList() {
   const list = $('#list');
-  if (state.list.length === 0) {
-    list.replaceChildren(el('div', { class: 'empty' },
-      'Your list is empty.', el('br'),
-      'Add items above, set up weekly staples, or pick meals.'));
-    $('#list-summary').textContent = '';
+  const total = state.list.length;
+  const done = state.list.filter((i) => i.checked).length;
+  const left = total - done;
+
+  $('#tab-count').hidden = left === 0;
+  $('#tab-count').textContent = left;
+  $('#list-actions').hidden = total === 0;
+  $('#progress').hidden = total === 0;
+
+  if (total === 0) {
+    list.replaceChildren(emptyState('bag', 'Your list is empty',
+      'Add things you\'ve run out of above, set up your weekly staples, or pick this week\'s meals.'));
     return;
   }
-  const done = state.list.filter((i) => i.checked).length;
-  $('#list-summary').textContent = `${state.list.length} items · ${done} in cart`;
+
+  $('#list-summary').textContent = left === 0 ? 'All done!' : `${left} item${left === 1 ? '' : 's'} to get`;
+  $('#list-count').textContent = `${done} of ${total} in cart`;
+  $('#progress-bar').style.width = `${Math.round((done / total) * 100)}%`;
 
   const groups = new Map(CATEGORIES.map((c) => [c, []]));
+  const inCart = [];
   state.list.forEach((i) => {
+    if (i.checked) { inCart.push(i); return; }
     if (!groups.has(i.cat)) groups.set(i.cat, []);
     groups.get(i.cat).push(i);
   });
 
+  const byName = (a, b) => a.name.localeCompare(b.name);
   const nodes = [];
   for (const [cat, items] of groups) {
     if (!items.length) continue;
-    items.sort((a, b) => (a.checked - b.checked) || a.name.localeCompare(b.name));
-    nodes.push(el('div', { class: 'group' },
-      el('h3', {}, cat),
-      items.map(listRow)));
+    nodes.push(
+      el('div', { class: 'group-head' }, el('span', {}, cat), el('span', { class: 'count' }, items.length)),
+      el('div', { class: 'group' }, items.sort(byName).map(listRow)));
+  }
+  if (inCart.length) {
+    nodes.push(
+      el('div', { class: 'group-head' }, el('span', {}, 'In cart'), el('span', { class: 'count' }, inCart.length)),
+      el('div', { class: 'group cart' }, inCart.sort(byName).map(listRow)));
   }
   list.replaceChildren(...nodes);
 }
 
+function sourceTags(item) {
+  return item.sources.map((src) => {
+    const kind = src === 'staple' ? 'weekly' : src.startsWith('meal:') ? 'meal' : 'added';
+    if (kind === 'added') return null; // the default, not worth a label
+    return el('span', { class: 'tag tag-' + kind }, sourceLabel(src));
+  }).filter(Boolean);
+}
+
 function listRow(item) {
-  return el('div', { class: 'row' + (item.checked ? ' done' : '') },
+  const tags = sourceTags(item);
+  const id = 'chk-' + item.id.replace(/[^a-z0-9]/gi, '_');
+  return el('label', { class: 'row' + (item.checked ? ' done' : ''), for: id },
     el('input', {
-      type: 'checkbox', checked: item.checked, 'aria-label': `In cart: ${item.name}`,
+      id, class: 'check', type: 'checkbox', checked: item.checked, 'aria-label': `In cart: ${item.name}`,
       onchange: (e) => { item.checked = e.target.checked; commit(); },
     }),
     el('div', { class: 'name' },
       el('span', {}, item.name),
-      el('small', {}, item.sources.map(sourceLabel).join(' · '))),
+      tags.length ? el('div', { class: 'meta' }, tags) : null),
     el('a', {
-      class: 'icon-btn', href: htSearchUrl(item.name), target: '_blank', rel: 'noopener',
+      class: 'icon-btn accent', href: htSearchUrl(item.name), target: '_blank', rel: 'noopener',
       title: 'Search Harris Teeter', 'aria-label': `Search Harris Teeter for ${item.name}`,
-    }, '🔍'),
+      onclick: (e) => e.stopPropagation(),
+    }, icon('search')),
     el('button', {
-      class: 'icon-btn', type: 'button', title: 'Change aisle', 'aria-label': `Change aisle for ${item.name}`,
-      onclick: () => pickCategory(item.name, item.cat),
-    }, '🏷️'),
-    el('button', {
-      class: 'icon-btn', type: 'button', title: 'Remove', 'aria-label': `Remove ${item.name}`,
-      onclick: () => withUndo(`Removed ${item.name}`, () => {
-        state.list = state.list.filter((i) => i !== item);
-      }),
-    }, '✕'));
+      class: 'icon-btn', type: 'button', title: 'More', 'aria-label': `More options for ${item.name}`,
+      onclick: (e) => {
+        e.preventDefault();
+        openItemSheet({
+          name: item.name,
+          cat: item.cat,
+          meta: item.sources.map(sourceLabel).join(' · '),
+          removeLabel: 'Remove from list',
+          onRemove: () => withUndo(`Removed ${item.name}`, () => {
+            state.list = state.list.filter((i) => i !== item);
+          }),
+        });
+      },
+    }, icon('more')));
 }
 
 function renderStaples() {
-  const ul = $('#staples');
+  const wrap = $('#staples');
   if (!state.staples.length) {
-    ul.replaceChildren(el('li', { class: 'empty' }, 'No staples yet. Add milk, eggs, bread…'));
+    wrap.replaceChildren(emptyState('repeat', 'No staples yet', 'Add the things you buy every week, like milk, eggs and bread.'));
     return;
   }
   const sorted = [...state.staples].sort((a, b) => a.name.localeCompare(b.name));
-  ul.replaceChildren(...sorted.map((s) => el('li', { class: 'row' },
-    el('div', { class: 'name' }, el('span', {}, s.name), el('small', {}, guessCategory(s.name))),
-    el('button', {
-      class: 'icon-btn', type: 'button', title: 'Change aisle', 'aria-label': `Change aisle for ${s.name}`,
-      onclick: () => pickCategory(s.name, guessCategory(s.name)),
-    }, '🏷️'),
-    el('button', {
-      class: 'icon-btn', type: 'button', title: 'Remove staple', 'aria-label': `Remove staple ${s.name}`,
-      onclick: () => withUndo(`${s.name} is no longer a staple`, () => {
-        state.staples = state.staples.filter((x) => x !== s);
-        removeSource(s.name, 'staple');
-      }),
-    }, '✕'))));
+  wrap.replaceChildren(
+    el('div', { class: 'group-head' }, el('span', {}, 'Your staples'), el('span', { class: 'count' }, sorted.length)),
+    el('div', { class: 'group' }, sorted.map((s) => {
+      const cat = guessCategory(s.name);
+      return el('div', { class: 'row static' },
+        el('div', { class: 'name' }, el('span', {}, s.name), el('div', { class: 'meta' }, el('span', { class: 'tag' }, cat))),
+        el('button', {
+          class: 'icon-btn', type: 'button', title: 'More', 'aria-label': `More options for ${s.name}`,
+          onclick: () => openItemSheet({
+            name: s.name,
+            cat,
+            meta: 'Weekly staple',
+            removeLabel: 'Remove from staples',
+            onRemove: () => withUndo(`${s.name} is no longer a staple`, () => {
+              state.staples = state.staples.filter((x) => x !== s);
+              removeSource(s.name, 'staple');
+            }),
+          }),
+        }, icon('more')));
+    })));
 }
 
 function renderMeals() {
   const wrap = $('#meals');
+  const picked = state.weekMeals.length;
+  $('#meals-eyebrow').textContent = picked ? `${picked} picked this week` : 'This week';
   if (!state.meals.length) {
-    wrap.replaceChildren(el('div', { class: 'empty' }, 'No meals saved yet. Add the meals you make often.'));
+    wrap.replaceChildren(emptyState('utensils', 'No meals yet', 'Tap + to add a meal you make often, with its ingredients.'));
     return;
   }
   const sorted = [...state.meals].sort((a, b) =>
     (state.weekMeals.includes(b.id) - state.weekMeals.includes(a.id)) || a.name.localeCompare(b.name));
-  const picked = state.weekMeals.length;
-  wrap.replaceChildren(
-    el('div', { class: 'summary' }, `${picked} meal${picked === 1 ? '' : 's'} picked this week`),
-    ...sorted.map((m) => {
-      const on = state.weekMeals.includes(m.id);
-      return el('div', { class: 'meal' + (on ? ' on' : '') },
-        el('div', { class: 'body', onclick: () => openMealEditor(m) },
-          el('strong', {}, m.name),
-          el('small', {}, m.ingredients.join(', ') || 'No ingredients yet')),
-        el('button', { class: 'pick', type: 'button', onclick: () => { toggleMeal(m.id); commit(); } },
-          on ? '✓ This week' : '+ Add'));
-    }));
+  wrap.replaceChildren(...sorted.map((m) => {
+    const on = state.weekMeals.includes(m.id);
+    return el('div', { class: 'meal' + (on ? ' on' : ''), onclick: () => openMealEditor(m) },
+      el('div', { class: 'avatar', style: `background:${mealColor(m.name)}` }, m.name.charAt(0).toUpperCase()),
+      el('div', { class: 'body' },
+        el('strong', {}, m.name),
+        el('small', {}, m.ingredients.join(', ') || 'No ingredients yet')),
+      el('button', {
+        class: 'pick', type: 'button', 'aria-pressed': on ? 'true' : 'false',
+        onclick: (e) => { e.stopPropagation(); toggleMeal(m.id); commit(); },
+      }, icon(on ? 'check' : 'plus'), on ? 'Added' : 'Add'));
+  }));
 }
 
 /* ---------- Dialogs ---------- */
@@ -380,18 +470,37 @@ function deleteMeal() {
   });
 }
 
-function pickCategory(name, current) {
-  $('#cat-dialog-title').textContent = `Aisle for “${name}”`;
+let itemSheet = null;
+
+function openItemSheet(opts) {
+  itemSheet = opts;
+  $('#item-dialog-title').textContent = opts.name;
+  $('#item-dialog-meta').textContent = opts.meta || '';
+  $('#item-search').href = htSearchUrl(opts.name);
+  $('#item-remove-label').textContent = opts.removeLabel;
   $('#cat-options').replaceChildren(...CATEGORIES.map((c) => el('button', {
-    class: 'btn' + (c === current ? ' current' : ''), value: c, type: 'submit',
-  }, c)));
-  const dlg = $('#cat-dialog');
-  dlg.returnValue = '';
-  dlg.onclose = () => {
-    if (CATEGORIES.includes(dlg.returnValue)) { setCategory(name, dlg.returnValue); commit(); }
-  };
-  dlg.showModal();
+    class: c === opts.cat ? 'current' : '', type: 'button',
+    onclick: () => {
+      setCategory(opts.name, c);
+      $('#item-dialog').close();
+      commit();
+      toast(`${opts.name} moved to ${c}`);
+    },
+  }, c, c === opts.cat ? icon('check') : null)));
+  $('#item-dialog').showModal();
 }
+
+$('#item-remove').addEventListener('click', () => {
+  $('#item-dialog').close();
+  if (itemSheet) itemSheet.onRemove();
+});
+
+// Tap outside a sheet to close it.
+document.querySelectorAll('dialog.sheet').forEach((d) => d.addEventListener('click', (e) => {
+  if (e.target !== d) return;
+  const r = d.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close();
+}));
 
 /* ---------- Text export ---------- */
 
@@ -749,21 +858,24 @@ function renderSyncStatus() {
   link.hidden = !sync.sheetUrl;
   if (sync.sheetUrl) link.href = sync.sheetUrl;
 
+  const dot = $('#sheet-dot');
   if (!connected) {
     badge.hidden = true;
-    $('#sheet-status').textContent = 'Not connected. Connect a Google Sheet to back up your data and share one list with the whole family.';
+    dot.className = 'status-dot';
+    $('#sheet-status').textContent = 'Not connected. Connect a Google Sheet to back up your data and share one list with the family.';
     return;
   }
   const pending = Object.values(sync.stamps).some((st) => st.dirty) || sync.tombs.length > 0;
-  let label; let detail;
-  if (syncing) { label = '⟳ Syncing'; detail = 'Syncing now…'; }
-  else if (sync.error === 'offline') { label = '⚠️ Offline'; detail = 'Offline. Changes are saved on this phone and will sync when you\'re back online.'; }
-  else if (sync.error) { label = '⚠️ Not synced'; detail = sync.error; }
-  else if (pending) { label = '⟳ Saving'; detail = 'Saving changes to the sheet…'; }
-  else { label = '✓ Synced'; detail = `Synced with Google Sheet ${describeTime(sync.lastSync)}.`; }
+  let label; let detail; let kind;
+  if (syncing) { label = 'Syncing'; detail = 'Syncing now…'; kind = 'busy'; }
+  else if (sync.error === 'offline') { label = 'Offline'; detail = 'Offline. Changes are saved on this phone and will sync when you\'re back online.'; kind = 'warn'; }
+  else if (sync.error) { label = 'Not synced'; detail = sync.error; kind = 'warn'; }
+  else if (pending) { label = 'Saving'; detail = 'Saving changes to the sheet…'; kind = 'busy'; }
+  else { label = 'Synced'; detail = `Connected. Last synced ${describeTime(sync.lastSync)}.`; kind = 'ok'; }
   badge.hidden = false;
   badge.textContent = label;
-  badge.classList.toggle('warn', !!sync.error && !syncing);
+  badge.className = 'sync-badge ' + kind;
+  dot.className = 'status-dot ' + (kind === 'warn' ? 'warn' : 'ok');
   $('#sheet-status').textContent = detail;
 }
 
